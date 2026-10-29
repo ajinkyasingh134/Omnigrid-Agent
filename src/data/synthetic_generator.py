@@ -16,32 +16,36 @@ def generate_base_telemetry(num_samples: int = 10000, sampling_rate: int = 1000,
     })
     return df
 
-def inject_anomalies(df: pd.DataFrame, spike_ratio: float = 0.05) -> pd.DataFrame:
+def inject_anomalies(df: pd.DataFrame, spike_ratio: float = 0.05, block_size: int = 50) -> pd.DataFrame:
     """
-    Injects synthetic electrical faults (current spikes on Phase A) 
-    into the telemetry DataFrame.
+    Injects synthetic electrical faults as continuous time blocks (bursts)
+    into Phase A telemetry to match real-world physical short-circuits.
     
-    :param df: DataFrame containing normal 3-phase telemetry
-    :param spike_ratio: Percentage of total rows to corrupt with faults (default: 5%)
-    :return: DataFrame with injected anomalies and updated ground-truth labels
+    :param df: Clean telemetry DataFrame
+    :param spike_ratio: Target percentage of anomalous rows (~5%)
+    :param block_size: Duration of each fault burst in time samples (default: 50)
+    :return: DataFrame with block-injected anomalies and updated labels
     """
-    # Create a clean copy to avoid mutating original data in-place
     df = df.copy()
     num_samples = len(df)
+    total_anomalies = int(num_samples * spike_ratio)
+    num_blocks = total_anomalies // block_size
     
-    # Calculate how many data rows should be marked as anomalous
-    num_anomalies = int(num_samples * spike_ratio)
+    # Randomly select starting indices for each continuous fault block
+    # Ensure blocks don't overlap or exceed dataset bounds
+    valid_starts = np.arange(0, num_samples - block_size, block_size)
+    chosen_starts = np.random.choice(valid_starts, size=num_blocks, replace=False)
     
-    # Randomly pick unique row indices across the dataset to inject faults
-    anomaly_indices = np.random.choice(df.index, size=num_anomalies, replace=False)
-    
-    # Generate random spike multiplier factors between 3.5x and 5.0x nominal current
-    spike_factors = np.random.uniform(3.5, 5.0, size=num_anomalies)
-    
-    # Multiply Phase A current at selected indices by the spike factor
-    df.loc[anomaly_indices, 'current_phase_a'] *= spike_factors
-    
-    # Update the ground-truth target label to 1 for these anomalous rows
-    df.loc[anomaly_indices, 'label'] = 1
-    
+    for start_idx in chosen_starts:
+        end_idx = start_idx + block_size
+        
+        # Draw a uniform spike intensity factor for the duration of the short-circuit
+        spike_factor = np.random.uniform(3.5, 5.0)
+        
+        # Multiply Phase A current over the continuous block duration
+        df.loc[start_idx:end_idx - 1, 'current_phase_a'] *= spike_factor
+        
+        # Mark all timestamps within the fault burst as anomalous
+        df.loc[start_idx:end_idx - 1, 'label'] = 1
+        
     return df
